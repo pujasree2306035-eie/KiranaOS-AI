@@ -1,9 +1,9 @@
 import os
 import json
+import inspect
 
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from openai import OpenAI
 
 from tools.inventory import (
     check_stock,
@@ -40,13 +40,8 @@ from tools.analytics import (
     daily_close_report
 )
 
-from tools.invoice import (
-    create_invoice
-)
-
-from tools.reports import (
-    create_business_report
-)
+from tools.invoice import create_invoice
+from tools.reports import create_business_report
 
 from tools.product_management import (
     add_product,
@@ -62,15 +57,21 @@ from database.memory import (
 
 load_dotenv()
 
-API_KEY = os.getenv("GEMINI_API_KEY")
+API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-client = genai.Client(
-    api_key=API_KEY
+if not API_KEY:
+    raise RuntimeError("OPENROUTER_API_KEY is missing from .env")
+
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=API_KEY,
+    default_headers={
+        "HTTP-Referer": "https://github.com/pujasree2306035-eie/KiranaOS-AI",
+        "X-Title": "KiranaOS AI"
+    }
 )
 
-MODEL = "gemini-3.6-flash"
-
-
+MODEL = "openrouter/free"
 SYSTEM_PROMPT = """
 You are KiranaOS AI, an AI operations assistant for an Indian retail shop.
 
@@ -120,6 +121,10 @@ IMPORTANT RULES:
 """
 
 
+def _json_result(value):
+    return json.dumps(value, default=str)
+
+
 def process_message(message, user_id="telegram_user"):
 
     artifact_file = None
@@ -136,59 +141,32 @@ def process_message(message, user_id="telegram_user"):
         """Sell stock directly when explicitly requested."""
         return reduce_stock(product_name, quantity)
 
-    def calculate_item_tool(
-        product_name: str,
-        quantity: float
-    ) -> str:
+    def calculate_item_tool(product_name: str, quantity: float) -> str:
         """Calculate price and GST for a product."""
-        return json.dumps(
-            calculate_item(product_name, quantity)
-        )
+        return _json_result(calculate_item(product_name, quantity))
 
-    def finalize_bill_tool(
-        product_name: str,
-        quantity: float
-    ) -> str:
+    def finalize_bill_tool(product_name: str, quantity: float) -> str:
         """Finalize a single-item bill."""
-        result = finalize_bill(product_name, quantity)
+        return _json_result(finalize_bill(product_name, quantity))
 
-        return json.dumps(result)
-
-    def add_item_tool(
-        product_name: str,
-        quantity: float
-    ) -> str:
+    def add_item_tool(product_name: str, quantity: float) -> str:
         """Add a product to the current draft bill."""
-        return json.dumps(
-            add_item(user_id, product_name, quantity)
-        )
+        return _json_result(add_item(user_id, product_name, quantity))
 
-    def remove_item_tool(
-        product_name: str
-    ) -> str:
+    def remove_item_tool(product_name: str) -> str:
         """Remove a product from the current draft bill."""
-        return json.dumps(
-            remove_item(user_id, product_name)
-        )
+        return _json_result(remove_item(user_id, product_name))
 
-    def update_quantity_tool(
-        product_name: str,
-        quantity: float
-    ) -> str:
+    def update_quantity_tool(product_name: str, quantity: float) -> str:
         """Update the quantity of a product in the current draft bill."""
-        return json.dumps(
-            update_quantity(user_id, product_name, quantity)
-        )
+        return _json_result(update_quantity(user_id, product_name, quantity))
 
     def view_draft_tool() -> str:
         """Show the current draft bill."""
-        return json.dumps(
-            view_draft(user_id)
-        )
+        return _json_result(view_draft(user_id))
 
     def finalize_draft_bill_tool() -> str:
         """Finalize the current draft bill and create a PDF invoice."""
-
         nonlocal artifact_file
 
         result = finalize_draft_bill(user_id)
@@ -198,63 +176,38 @@ def process_message(message, user_id="telegram_user"):
             result["invoice_file"] = invoice_file
             artifact_file = invoice_file
 
-        return json.dumps(result)
+        return _json_result(result)
 
-    def add_credit_tool(
-        customer_name: str,
-        amount: float
-    ) -> str:
+    def add_credit_tool(customer_name: str, amount: float) -> str:
         """Add credit to a customer's Khata account."""
-        return json.dumps(
-            add_credit(customer_name, amount)
-        )
+        return _json_result(add_credit(customer_name, amount))
 
-    def record_payment_tool(
-        customer_name: str,
-        amount: float
-    ) -> str:
+    def record_payment_tool(customer_name: str, amount: float) -> str:
         """Record a customer payment."""
-        return json.dumps(
-            record_payment(customer_name, amount)
-        )
+        return _json_result(record_payment(customer_name, amount))
 
-    def get_balance_tool(
-        customer_name: str
-    ) -> str:
+    def get_balance_tool(customer_name: str) -> str:
         """Check a customer's outstanding balance."""
-        return json.dumps(
-            get_balance(customer_name)
-        )
+        return _json_result(get_balance(customer_name))
 
-    def get_low_stock_tool(
-        threshold: float = 10
-    ) -> str:
+    def get_low_stock_tool(threshold: float = 10) -> str:
         """Find products whose stock is at or below the threshold."""
-        return json.dumps(
-            get_low_stock(threshold)
-        )
+        return _json_result(get_low_stock(threshold))
 
     def get_reorder_suggestions_tool() -> str:
         """Suggest products that should be reordered."""
-        return json.dumps(
-            get_reorder_suggestions()
-        )
+        return _json_result(get_reorder_suggestions())
 
     def daily_sales_summary_tool() -> str:
         """Get today's sales summary."""
-        return json.dumps(
-            daily_sales_summary()
-        )
+        return _json_result(daily_sales_summary())
 
     def daily_close_report_tool() -> str:
         """Get today's complete business closing information."""
-        return json.dumps(
-            daily_close_report()
-        )
+        return _json_result(daily_close_report())
 
     def business_report_tool() -> str:
         """Generate today's business analysis as a PowerPoint file."""
-
         nonlocal artifact_file
 
         result = create_business_report()
@@ -262,7 +215,7 @@ def process_message(message, user_id="telegram_user"):
         if result.get("success"):
             artifact_file = result.get("file_path")
 
-        return json.dumps(result)
+        return _json_result(result)
 
     def add_product_tool(
         name: str,
@@ -275,8 +228,7 @@ def process_message(message, user_id="telegram_user"):
         gst_rate: float
     ) -> str:
         """Add a new product to inventory."""
-
-        return json.dumps(
+        return _json_result(
             add_product(
                 name,
                 category,
@@ -291,99 +243,170 @@ def process_message(message, user_id="telegram_user"):
 
     def list_products_tool() -> str:
         """List all products in inventory."""
-        return json.dumps(
-            list_products()
-        )
+        return _json_result(list_products())
 
-    def save_memory_tool(
-        memory_key: str,
-        memory_value: str
-    ) -> str:
+    def save_memory_tool(memory_key: str, memory_value: str) -> str:
         """Save a user preference or important shop detail permanently."""
-
-        return json.dumps(
-            save_memory(
-                user_id,
-                memory_key,
-                memory_value
-            )
+        return _json_result(
+            save_memory(user_id, memory_key, memory_value)
         )
 
-    def get_memory_tool(
-        memory_key: str
-    ) -> str:
+    def get_memory_tool(memory_key: str) -> str:
         """Retrieve a specific saved memory."""
-
-        return json.dumps(
-            get_memory(
-                user_id,
-                memory_key
-            )
+        return _json_result(
+            get_memory(user_id, memory_key)
         )
 
     def get_all_memories_tool() -> str:
         """Retrieve all saved memories for the current user."""
+        return _json_result(get_all_memories(user_id))
 
-        return json.dumps(
-            get_all_memories(user_id)
-        )
-
-    tools = [
+    tool_functions = [
         check_stock_tool,
         receive_stock_tool,
         sell_stock_tool,
-
         calculate_item_tool,
         finalize_bill_tool,
-
         add_item_tool,
         remove_item_tool,
         update_quantity_tool,
         view_draft_tool,
         finalize_draft_bill_tool,
-
         add_credit_tool,
         record_payment_tool,
         get_balance_tool,
-
         get_low_stock_tool,
         get_reorder_suggestions_tool,
-
         daily_sales_summary_tool,
         daily_close_report_tool,
         business_report_tool,
-
         add_product_tool,
         list_products_tool,
-
         save_memory_tool,
         get_memory_tool,
         get_all_memories_tool
     ]
 
-    config = types.GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT,
-        tools=tools
-    )
+    function_map = {fn.__name__: fn for fn in tool_functions}
 
-    chat = client.chats.create(
-        model=MODEL,
-        config=config
-    )
+    def python_type_to_schema(annotation):
+        if annotation is str:
+            return {"type": "string"}
+        if annotation is int:
+            return {"type": "integer"}
+        if annotation is float:
+            return {"type": "number"}
+        if annotation is bool:
+            return {"type": "boolean"}
+        return {"type": "string"}
 
-    response = chat.send_message(message)
+    tools = []
 
-    result = {
-        "text": response.text
-    }
+    for fn in tool_functions:
+        signature = inspect.signature(fn)
+        properties = {}
+        required = []
 
-    if artifact_file and os.path.exists(artifact_file):
-        result["artifact_file"] = artifact_file
+        for name, parameter in signature.parameters.items():
+            properties[name] = python_type_to_schema(parameter.annotation)
 
-        if artifact_file.lower().endswith(".pdf"):
-            result["invoice_file"] = artifact_file
+            if parameter.default is inspect.Parameter.empty:
+                required.append(name)
 
-        elif artifact_file.lower().endswith(".pptx"):
-            result["report_file"] = artifact_file
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": fn.__name__,
+                "description": inspect.getdoc(fn) or "",
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                    "additionalProperties": False
+                }
+            }
+        })
 
-    return result
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": message}
+    ]
+
+    try:
+        for _ in range(8):
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto"
+            )
+
+            assistant_message = response.choices[0].message
+
+            assistant_dict = {
+                "role": "assistant",
+                "content": assistant_message.content
+            }
+
+            if assistant_message.tool_calls:
+                assistant_dict["tool_calls"] = []
+
+                for tool_call in assistant_message.tool_calls:
+                    assistant_dict["tool_calls"].append({
+                        "id": tool_call.id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_call.function.name,
+                            "arguments": tool_call.function.arguments
+                        }
+                    })
+
+            messages.append(assistant_dict)
+
+            if not assistant_message.tool_calls:
+                break
+
+            for tool_call in assistant_message.tool_calls:
+                name = tool_call.function.name
+
+                if name not in function_map:
+                    tool_result = {
+                        "success": False,
+                        "error": f"Unknown tool: {name}"
+                    }
+                else:
+                    try:
+                        arguments = json.loads(tool_call.function.arguments or "{}")
+                        tool_result = function_map[name](**arguments)
+                    except Exception as exc:
+                        tool_result = {
+                            "success": False,
+                            "error": str(exc)
+                        }
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": str(tool_result)
+                })
+
+        result = {
+            "text": assistant_message.content or "Done."
+        }
+
+        if artifact_file and os.path.exists(artifact_file):
+            result["artifact_file"] = artifact_file
+
+            if artifact_file.lower().endswith(".pdf"):
+                result["invoice_file"] = artifact_file
+
+            elif artifact_file.lower().endswith(".pptx"):
+                result["report_file"] = artifact_file
+
+        return result
+
+    except Exception as exc:
+        return {
+            "text": f"AI service error: {exc}",
+            "error": str(exc)
+        }
