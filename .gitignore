@@ -18,10 +18,6 @@ kirana.db
 *.sqlite
 *.sqlite3
 
-# Generated invoices and reports
-artifacts/invoices/*.pdf
-artifacts/reports/*.pptx
-
 # IDE / editor files
 .vscode/
 .idea/
