@@ -40,7 +40,7 @@ Response / PDF / PPTX
 ## Tech Stack
 
 - Python
-- Google Gemini
+- OpenRouter (free model routing)
 - Telegram Bot API
 - SQLite
 - ReportLab
