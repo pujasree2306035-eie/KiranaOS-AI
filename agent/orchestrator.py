@@ -70,8 +70,8 @@ client = OpenAI(
         "X-Title": "KiranaOS AI"
     }
 )
+MODEL = "minimax/minimax-m3:free"
 
-MODEL = "openrouter/free"
 SYSTEM_PROMPT = """
 You are KiranaOS AI, an AI operations assistant for an Indian retail shop.
 
@@ -90,11 +90,17 @@ IMPORTANT RULES:
 6. Stock must be reduced only when a bill is finalized.
 7. Draft bills do not reduce inventory.
 8. GST must be calculated using the product GST rate.
-9. When the user asks to add an item to a bill, add it to the current draft.
-10. When the user asks to remove an item, remove it from the draft.
-11. When the user asks to change quantity, update the draft quantity.
-12. When the user asks to show the bill, show the current draft bill.
-13. When the user asks to finalize the bill, finalize the draft and generate an invoice.
+9. BILLING RULE: When the user asks to create, start, make, prepare, or add products to a bill, you MUST use add_item_tool for EVERY product mentioned. NEVER use finalize_bill_tool for these requests.
+10. For a bill containing multiple products, call add_item_tool separately for each product and quantity.
+11. After adding the requested products, use view_draft_tool to verify the draft before replying.
+12. Draft bills MUST remain drafts until the user explicitly asks to finalize them.
+13. When the user asks to remove an item, use remove_item_tool.
+14. When the user asks to change quantity, use update_quantity_tool.
+15. When the user asks to show the bill, use view_draft_tool.
+16. When the user explicitly asks to finalize the current draft bill, use finalize_draft_bill_tool.
+17. NEVER claim that an item was added to a bill unless the corresponding tool successfully added it.
+18. NEVER finalize a bill unless the user explicitly asks for finalization.
+19. NEVER use finalize_bill_tool for normal bill creation or draft editing.
 14. When a bill is finalized, provide a clear summary of items, subtotal, GST and total.
 15. When the user asks about low stock, use the low-stock tool.
 16. When the user asks what products need to be reordered or what should be purchased,
@@ -150,7 +156,13 @@ def process_message(message, user_id="telegram_user"):
         return _json_result(finalize_bill(product_name, quantity))
 
     def add_item_tool(product_name: str, quantity: float) -> str:
-        """Add a product to the current draft bill."""
+        """Add a product to the current draft bill.
+
+        MUST be called whenever the user asks to create, start, make,
+        prepare, or add a product to a bill. For multiple products,
+        call this tool separately for each product. This tool does NOT
+        finalize the bill and does NOT reduce stock.
+        """
         return _json_result(add_item(user_id, product_name, quantity))
 
     def remove_item_tool(product_name: str) -> str:
@@ -162,11 +174,15 @@ def process_message(message, user_id="telegram_user"):
         return _json_result(update_quantity(user_id, product_name, quantity))
 
     def view_draft_tool() -> str:
-        """Show the current draft bill."""
+        """Show and verify the current draft bill."""
         return _json_result(view_draft(user_id))
 
     def finalize_draft_bill_tool() -> str:
-        """Finalize the current draft bill and create a PDF invoice."""
+        """Finalize the current draft bill and create a PDF invoice.
+
+        Use ONLY when the user explicitly asks to finalize, complete,
+        confirm, or checkout the current draft bill.
+        """
         nonlocal artifact_file
 
         result = finalize_draft_bill(user_id)
@@ -264,9 +280,7 @@ def process_message(message, user_id="telegram_user"):
     tool_functions = [
         check_stock_tool,
         receive_stock_tool,
-        sell_stock_tool,
         calculate_item_tool,
-        finalize_bill_tool,
         add_item_tool,
         remove_item_tool,
         update_quantity_tool,

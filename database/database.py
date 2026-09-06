@@ -2,10 +2,12 @@ import sqlite3
 
 DATABASE = "kirana.db"
 
-connection = sqlite3.connect(DATABASE)
+connection = sqlite3.connect(DATABASE, timeout=30)
 cursor = connection.cursor()
 
-# Products table
+cursor.execute("PRAGMA journal_mode=WAL")
+cursor.execute("PRAGMA busy_timeout=30000")
+
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,7 +22,6 @@ CREATE TABLE IF NOT EXISTS products (
 )
 """)
 
-# Sales table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS sales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,7 +34,6 @@ CREATE TABLE IF NOT EXISTS sales (
 )
 """)
 
-# Draft bills table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS draft_bills (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +42,6 @@ CREATE TABLE IF NOT EXISTS draft_bills (
 )
 """)
 
-# Draft bill items table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS draft_bill_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

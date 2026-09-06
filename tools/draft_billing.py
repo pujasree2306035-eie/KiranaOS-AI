@@ -2,38 +2,86 @@ import sqlite3
 
 DATABASE = "kirana.db"
 
+def resolve_product_name(cursor, product_name):
+    cursor.execute(
+        """
+        SELECT name
+        FROM products
+        WHERE LOWER(name) = LOWER(?)
+           OR LOWER(name) LIKE LOWER(?)
+        """,
+        (product_name, f"%{product_name}%")
+    )
+
+    products = cursor.fetchall()
+
+    if len(products) == 1:
+        return products[0][0]
+
+    return None
+
 
 def get_or_create_draft(user_id):
 
     connection = sqlite3.connect(DATABASE)
     cursor = connection.cursor()
 
+    user_id = str(user_id)
+
     cursor.execute(
-        "SELECT id FROM draft_bills WHERE user_id = ? AND status = 'draft'",
-        (str(user_id),)
+        """
+        SELECT id, status
+        FROM draft_bills
+        WHERE user_id = ?
+        """,
+        (user_id,)
     )
 
     bill = cursor.fetchone()
 
     if bill:
-        bill_id = bill[0]
+        bill_id, status = bill
 
-    else:
+        if status == "draft":
+            connection.close()
+            return bill_id
+
         cursor.execute(
             """
-            INSERT INTO draft_bills (user_id, status)
-            VALUES (?, 'draft')
+            UPDATE draft_bills
+            SET status = 'draft'
+            WHERE id = ?
             """,
-            (str(user_id),)
+            (bill_id,)
         )
 
-        bill_id = cursor.lastrowid
+        cursor.execute(
+            """
+            DELETE FROM draft_bill_items
+            WHERE bill_id = ?
+            """,
+            (bill_id,)
+        )
+
+        connection.commit()
+        connection.close()
+
+        return bill_id
+
+    cursor.execute(
+        """
+        INSERT INTO draft_bills (user_id, status)
+        VALUES (?, 'draft')
+        """,
+        (user_id,)
+    )
+
+    bill_id = cursor.lastrowid
 
     connection.commit()
     connection.close()
 
     return bill_id
-
 
 def add_item(user_id, product_name, quantity):
 
@@ -46,19 +94,20 @@ def add_item(user_id, product_name, quantity):
     connection = sqlite3.connect(DATABASE)
     cursor = connection.cursor()
 
-    # Check product
+    # Find product by exact name, case-insensitive, or unique partial name
     cursor.execute(
         """
         SELECT name, stock, unit
         FROM products
-        WHERE name = ?
+        WHERE LOWER(name) = LOWER(?)
+           OR LOWER(name) LIKE LOWER(?)
         """,
-        (product_name,)
+        (product_name, f"%{product_name}%")
     )
 
-    product = cursor.fetchone()
+    products = cursor.fetchall()
 
-    if product is None:
+    if len(products) == 0:
         connection.close()
 
         return {
@@ -66,7 +115,18 @@ def add_item(user_id, product_name, quantity):
             "message": f"Product '{product_name}' not found."
         }
 
-    name, stock, unit = product
+    if len(products) > 1:
+        connection.close()
+
+        return {
+            "success": False,
+            "message": (
+                f"Multiple products match '{product_name}'. "
+                "Please specify the product name more clearly."
+            )
+        }
+
+    name, stock, unit = products[0]
 
     # Create or get draft
     bill_id = get_or_create_draft(user_id)
@@ -123,7 +183,6 @@ def add_item(user_id, product_name, quantity):
         "available_stock": stock
     }
 
-
 def remove_item(user_id, product_name):
 
     connection = sqlite3.connect(DATABASE)
@@ -142,7 +201,6 @@ def remove_item(user_id, product_name):
 
     if bill is None:
         connection.close()
-
         return {
             "success": False,
             "message": "No active draft bill."
@@ -152,28 +210,52 @@ def remove_item(user_id, product_name):
 
     cursor.execute(
         """
-        DELETE FROM draft_bill_items
-        WHERE bill_id = ? AND product_name = ?
+        SELECT product_name
+        FROM draft_bill_items
+        WHERE bill_id = ?
         """,
-        (bill_id, product_name)
+        (bill_id,)
     )
 
-    if cursor.rowcount == 0:
-        connection.close()
+    draft_items = [row[0] for row in cursor.fetchall()]
 
+    matched_name = None
+
+    for item in draft_items:
+        if (
+            item.lower() == product_name.lower()
+            or product_name.lower() in item.lower()
+        ):
+            if matched_name is not None:
+                connection.close()
+                return {
+                    "success": False,
+                    "message": f"Multiple items match '{product_name}'."
+                }
+            matched_name = item
+
+    if matched_name is None:
+        connection.close()
         return {
             "success": False,
             "message": f"{product_name} is not in the draft bill."
         }
+
+    cursor.execute(
+        """
+        DELETE FROM draft_bill_items
+        WHERE bill_id = ? AND product_name = ?
+        """,
+        (bill_id, matched_name)
+    )
 
     connection.commit()
     connection.close()
 
     return {
         "success": True,
-        "message": f"Removed {product_name} from the draft bill."
+        "message": f"Removed {matched_name} from the draft bill."
     }
-
 
 def update_quantity(user_id, product_name, quantity):
 
@@ -196,7 +278,6 @@ def update_quantity(user_id, product_name, quantity):
 
     if bill is None:
         connection.close()
-
         return {
             "success": False,
             "message": "No active draft bill."
@@ -204,30 +285,62 @@ def update_quantity(user_id, product_name, quantity):
 
     bill_id = bill[0]
 
+    # Resolve the user's product name to the actual catalog name
+    cursor.execute(
+        """
+        SELECT product_name
+        FROM draft_bill_items
+        WHERE bill_id = ?
+        """,
+        (bill_id,)
+    )
+
+    draft_items = [row[0] for row in cursor.fetchall()]
+
+    matched_name = None
+
+    for item in draft_items:
+        if (
+            item.lower() == product_name.lower()
+            or product_name.lower() in item.lower()
+        ):
+            if matched_name is not None:
+                connection.close()
+                return {
+                    "success": False,
+                    "message": f"Multiple items match '{product_name}'."
+                }
+            matched_name = item
+
+    if matched_name is None:
+        connection.close()
+        return {
+            "success": False,
+            "message": f"{product_name} is not in the draft bill."
+        }
+
     cursor.execute(
         """
         SELECT name, stock, unit
         FROM products
         WHERE name = ?
         """,
-        (product_name,)
+        (matched_name,)
     )
 
     product = cursor.fetchone()
 
     if product is None:
         connection.close()
-
         return {
             "success": False,
-            "message": f"Product '{product_name}' not found."
+            "message": f"Product '{matched_name}' not found."
         }
 
     name, stock, unit = product
 
     if quantity > stock:
         connection.close()
-
         return {
             "success": False,
             "message": (
@@ -245,14 +358,6 @@ def update_quantity(user_id, product_name, quantity):
         (quantity, bill_id, name)
     )
 
-    if cursor.rowcount == 0:
-        connection.close()
-
-        return {
-            "success": False,
-            "message": f"{name} is not in the draft bill."
-        }
-
     connection.commit()
     connection.close()
 
@@ -263,8 +368,6 @@ def update_quantity(user_id, product_name, quantity):
             f"{quantity:g} {unit}."
         )
     }
-
-
 def view_draft(user_id):
 
     connection = sqlite3.connect(DATABASE)
