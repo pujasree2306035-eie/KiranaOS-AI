@@ -1,0 +1,34 @@
+# Python virtual environment
+venv/
+.venv/
+env/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database
+kirana.db
+*.sqlite
+*.sqlite3
+
+# Generated invoices and reports
+artifacts/invoices/*.pdf
+artifacts/reports/*.pptx
+
+# IDE / editor files
+.vscode/
+.idea/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

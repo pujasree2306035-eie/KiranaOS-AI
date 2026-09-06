@@ -1,0 +1,1 @@
+print("KiranaOS AI started!")
